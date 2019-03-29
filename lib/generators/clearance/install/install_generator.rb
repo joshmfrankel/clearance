@@ -7,8 +7,11 @@ module Clearance
       include Rails::Generators::Migration
       source_root File.expand_path('../templates', __FILE__)
 
+      class_option :model, type: :string, aliases: '-m'
+
       def create_clearance_initializer
-        copy_file 'clearance.rb', 'config/initializers/clearance.rb'
+        @model = options[:model].presence || "User"
+        template('clearance.rb', 'config/initializers/clearance.rb')
       end
 
       def inject_clearance_into_application_controller
@@ -20,23 +23,31 @@ module Clearance
       end
 
       def create_or_inject_clearance_into_user_model
-        if File.exist? "app/models/user.rb"
+        model_name = options[:model].presence || User
+        model_filepath = "app/models/#{model_name.underscore}.rb"
+
+        if File.exists? model_filepath
           inject_into_file(
-            "app/models/user.rb",
+            model_filepath,
             "  include Clearance::User\n\n",
-            after: "class User < #{models_inherit_from}\n",
+            after: "class #{model_name} < #{models_inherit_from}\n"
           )
         else
           @inherit_from = models_inherit_from
-          template("user.rb.erb", "app/models/user.rb")
+          @model_name = model_name
+          template("user.rb.erb", model_filepath)
         end
       end
 
       def create_clearance_migration
-        if users_table_exists?
+        table_name = (options[:model].present? ? options[:model].demodulize.underscore.pluralize : :users)
+
+        if table_exists?(table_name: table_name)
           create_add_columns_migration
         else
-          copy_migration 'create_users.rb'
+          @table_name = table_name
+          @model_name = options[:model].presence || "Users"
+          copy_migration 'db/migrate/create_users.rb', "./db/migrate/create_#{table_name}.rb"
         end
       end
 
@@ -57,11 +68,11 @@ module Clearance
         end
       end
 
-      def copy_migration(migration_name, config = {})
-        unless migration_exists?(migration_name)
+      def copy_migration(source, destination, config = {})
+        unless migration_exists?(destination)
           migration_template(
-            "db/migrate/#{migration_name}",
-            "db/migrate/#{migration_name}",
+            source,
+            destination,
             config.merge(migration_version: migration_version),
           )
         end
@@ -101,11 +112,11 @@ module Clearance
         file.sub(%r{^.*(db/migrate/)(?:\d+_)?}, '')
       end
 
-      def users_table_exists?
+      def table_exists?(table_name:)
         if ActiveRecord::Base.connection.respond_to?(:data_source_exists?)
-          ActiveRecord::Base.connection.data_source_exists?(:users)
+          ActiveRecord::Base.connection.data_source_exists?(table_name)
         else
-          ActiveRecord::Base.connection.table_exists?(:users)
+          ActiveRecord::Base.connection.table_exists?(table_name)
         end
       end
 
