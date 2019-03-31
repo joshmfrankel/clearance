@@ -7,10 +7,11 @@ module Clearance
       include Rails::Generators::Migration
       source_root File.expand_path('../templates', __FILE__)
 
-      class_option :model, type: :string, aliases: '-m'
+      DEFAULT_USER_MODEL = "User"
+      class_option :model, type: :string, aliases: '-m', default: DEFAULT_USER_MODEL
 
       def create_clearance_initializer
-        @model = options[:model].presence || "User"
+        @model = model
         template('clearance.rb', 'config/initializers/clearance.rb')
       end
 
@@ -23,30 +24,28 @@ module Clearance
       end
 
       def create_or_inject_clearance_into_user_model
-        model_name = options[:model].presence || User
-        model_filepath = "app/models/#{model_name.underscore}.rb"
+        model_filepath = "app/models/#{model.underscore}.rb"
 
-        if File.exists? model_filepath
+        if File.exists?(model_filepath) && !File.readlines(model_filepath).grep(/include Clearance::User/).any?
           inject_into_file(
             model_filepath,
             "  include Clearance::User\n\n",
-            after: "class #{model_name} < #{models_inherit_from}\n"
+            after: "class #{model} < #{models_inherit_from}\n"
           )
         else
           @inherit_from = models_inherit_from
-          @model_name = model_name
+          @model = model
           template("user.rb.erb", model_filepath)
         end
       end
 
       def create_clearance_migration
-        table_name = (options[:model].present? ? options[:model].demodulize.underscore.pluralize : :users)
+        @table_name = table_name
+        @model = model
 
-        if table_exists?(table_name: table_name)
+        if table_exists?
           create_add_columns_migration
         else
-          @table_name = table_name
-          @model_name = options[:model].presence || "Users"
           copy_migration 'db/migrate/create_users.rb', "./db/migrate/create_#{table_name}.rb"
         end
       end
@@ -57,6 +56,14 @@ module Clearance
 
       private
 
+      def model
+        @_model ||= options[:model].presence || DEFAULT_USER_MODEL
+      end
+
+      def table_name
+        @_table_name ||= (options[:model].present? ? options[:model].demodulize.underscore.pluralize : DEFAULT_USER_MODEL.tableize)
+      end
+
       def create_add_columns_migration
         if migration_needed?
           config = {
@@ -64,7 +71,7 @@ module Clearance
             new_indexes: new_indexes
           }
 
-          copy_migration('add_clearance_to_users.rb', config)
+          copy_migration 'db/migrate/add_clearance_to_users.rb', "./db/migrate/add_clearance_to_#{table_name}.rb", config
         end
       end
 
@@ -88,14 +95,14 @@ module Clearance
           encrypted_password: 't.string :encrypted_password, limit: 128',
           confirmation_token: 't.string :confirmation_token, limit: 128',
           remember_token: 't.string :remember_token, limit: 128'
-        }.reject { |column| existing_users_columns.include?(column.to_s) }
+        }.reject { |column| existing_table_columns.include?(column.to_s) }
       end
 
       def new_indexes
         @new_indexes ||= {
-          index_users_on_email: 'add_index :users, :email',
-          index_users_on_remember_token: 'add_index :users, :remember_token'
-        }.reject { |index| existing_users_indexes.include?(index.to_s) }
+          "index_#{table_name}_on_email" => "add_index :#{table_name}, :email",
+          "index_#{table_name}_on_remember_token" => "add_index :#{table_name}, :remember_token"
+        }.reject { |index| existing_table_indexes.include?(index.to_s) }
       end
 
       def migration_exists?(name)
@@ -112,7 +119,7 @@ module Clearance
         file.sub(%r{^.*(db/migrate/)(?:\d+_)?}, '')
       end
 
-      def table_exists?(table_name:)
+      def table_exists?
         if ActiveRecord::Base.connection.respond_to?(:data_source_exists?)
           ActiveRecord::Base.connection.data_source_exists?(table_name)
         else
@@ -120,12 +127,12 @@ module Clearance
         end
       end
 
-      def existing_users_columns
-        ActiveRecord::Base.connection.columns(:users).map(&:name)
+      def existing_table_columns
+        ActiveRecord::Base.connection.columns(table_name).map(&:name)
       end
 
-      def existing_users_indexes
-        ActiveRecord::Base.connection.indexes(:users).map(&:name)
+      def existing_table_indexes
+        ActiveRecord::Base.connection.indexes(table_name).map(&:name)
       end
 
       # for generating a timestamp when using `create_migration`
