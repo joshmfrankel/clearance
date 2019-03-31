@@ -1,6 +1,6 @@
-class AddClearanceToUsers < ActiveRecord::Migration<%= migration_version %>
+class AddClearanceTo<%= @model.pluralize %> < ActiveRecord::Migration<%= migration_version %>
   def self.up
-    change_table :users do |t|
+    change_table :<%= @table_name %> do |t|
 <% config[:new_columns].values.each do |column| -%>
       <%= column %>
 <% end -%>
@@ -10,19 +10,19 @@ class AddClearanceToUsers < ActiveRecord::Migration<%= migration_version %>
     <%= index %>
 <% end -%>
 
-    users = select_all("SELECT id FROM users WHERE remember_token IS NULL")
+    user_models = select_all("SELECT id FROM <%= @table_name %> WHERE remember_token IS NULL")
 
-    users.each do |user|
+    user_models.each do |user_model|
       update <<-SQL
-        UPDATE users
+        UPDATE <%= @table_name %>
         SET remember_token = '#{Clearance::Token.new}'
-        WHERE id = '#{user['id']}'
+        WHERE id = '#{user_model['id']}'
       SQL
     end
   end
 
   def self.down
-    change_table :users do |t|
+    change_table :<%= @table_name %> do |t|
 <% if config[:new_columns].any? -%>
       t.remove <%= new_columns.keys.map { |column| ":#{column}" }.join(", ") %>
 <% end -%>
