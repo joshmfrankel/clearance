@@ -1,4 +1,4 @@
-class Create<%= @model %> < ActiveRecord::Migration<%= migration_version %>
+class Create<%= @model.pluralize %> < ActiveRecord::Migration<%= migration_version %>
   def change
     create_table :<%= @table_name %> do |t|
       t.timestamps null: false
